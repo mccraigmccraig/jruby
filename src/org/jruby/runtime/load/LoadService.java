@@ -54,6 +54,7 @@ import org.jruby.Ruby;
 import org.jruby.RubyArray;
 import org.jruby.RubyFile;
 import org.jruby.RubyHash;
+import org.jruby.RubyInstanceConfig;
 import org.jruby.RubyString;
 import org.jruby.ast.executable.Script;
 import org.jruby.exceptions.MainExitException;
@@ -638,6 +639,20 @@ public class LoadService {
             throw runtime.newLoadError("No such file to load -- " + file);
         }
     }
+
+    private void debugLog(String msg) {
+	if (RubyInstanceConfig.DEBUG_LOAD_SERVICE) {
+	    runtime.getErr().println( "LoadService: " + msg );
+	}
+    }
+
+    private void debugLogTry(String msg) {
+	debugLog("trying: " + msg);
+    }
+
+    private void debugLogFound( LoadServiceResource resource ) {
+	debugLog( "found: " + resource.getURL().toString() );
+    }
     
     private Library findBuiltinLibrary(SearchState state, String baseName, SuffixType suffixType) {
         for (String suffix : suffixType.getSuffixes()) {
@@ -716,9 +731,11 @@ public class LoadService {
             // check current directory; if file exists, retrieve URL and return resource
             try {
                 JRubyFile file = JRubyFile.create(runtime.getCurrentDirectory(), RubyFile.expandUserPath(runtime.getCurrentContext(), namePlusSuffix));
+		debugLogTry(file.toString());
                 if (file.isFile() && file.isAbsolute()) {
                     try {
                         foundResource = new LoadServiceResource(file.toURI().toURL(), namePlusSuffix);
+			debugLogFound(foundResource);
                         state.loadName = namePlusSuffix;
                         break;
                     } catch (MalformedURLException e) {
@@ -741,8 +758,10 @@ public class LoadService {
                 String namePlusSuffix = baseName + suffix;
                 try {
                     URL url = new URL(namePlusSuffix);
+		    debugLogTry(url.toString());
                     if (url.openStream() != null) {
                         foundResource = new LoadServiceResource(url, namePlusSuffix);
+			debugLogFound(foundResource);
                     }
                 } catch (FileNotFoundException e) {
                 } catch (MalformedURLException e) {
@@ -761,8 +780,10 @@ public class LoadService {
                 try {
                     JarFile file = new JarFile(namePlusSuffix.substring(5, namePlusSuffix.indexOf("!/")));
                     String filename = namePlusSuffix.substring(namePlusSuffix.indexOf("!/") + 2);
+		    debugLogTry(file.toString());
                     if(file.getJarEntry(filename) != null) {
                         foundResource = new LoadServiceResource(new URL("jar:" + namePlusSuffix), namePlusSuffix);
+			debugLogFound(foundResource);
                     }
                 } catch(Exception e) {}
                 if (foundResource != null) {
@@ -871,6 +892,7 @@ public class LoadService {
                                                      .getCanonicalPath().length()+1).replaceAll("\\\\","/");
             } catch(Exception e) {}
         }
+	debugLogTry("trying jar: " + current.getName() + "!/" + canonicalEntry);
         if (current != null && current.getJarEntry(canonicalEntry) != null) {
             try {
                 if (loadPathEntry.endsWith(".jar")) {
@@ -880,6 +902,7 @@ public class LoadService {
                 } else {
                     foundResource =  new LoadServiceResource(new URL("jar:file:" + loadPathEntry.substring(4) + "!/" + namePlusSuffix), loadPathEntry + namePlusSuffix);
                 }
+		debugLogFound(foundResource);
             } catch (MalformedURLException e) {
                 throw runtime.newIOErrorFromException(e);
             }
@@ -910,9 +933,11 @@ public class LoadService {
                     }
                     actualPath = JRubyFile.create(JRubyFile.create(runtime.getCurrentDirectory(), loadPathEntry).getAbsolutePath(), RubyFile.expandUserPath(runtime.getCurrentContext(), namePlusSuffix));
                 }
+		debugLogTry(actualPath.toString());
                 if (actualPath.isFile()) {
                     try {
                         foundResource = new LoadServiceResource(actualPath.toURI().toURL(), reportedPath);
+			debugLogFound(foundResource);
                     } catch (MalformedURLException e) {
                         throw runtime.newIOErrorFromException(e);
                     }
@@ -942,9 +967,11 @@ public class LoadService {
                     }
                     actualPath = new File(RubyFile.expandUserPath(runtime.getCurrentContext(), reportedPath));
                 }
+		debugLogTry(actualPath.toString());
                 if (actualPath.isFile()) {
                     try {
                         foundResource = new LoadServiceResource(actualPath.toURI().toURL(), reportedPath);
+			debugLogFound(foundResource);
                     } catch (MalformedURLException e) {
                         throw runtime.newIOErrorFromException(e);
                     }
@@ -981,11 +1008,14 @@ public class LoadService {
             if (entry.charAt(0) == '/' || (entry.length() > 1 && entry.charAt(1) == ':')) continue;
             
             // otherwise, try to load from classpath (Note: Jar resources always uses '/')
+	    debugLogTry("Classpath: " + entry + "/" + name);
             URL loc = classLoader.getResource(entry + "/" + name);
 
             // Make sure this is not a directory or unavailable in some way
             if (isRequireable(loc)) {
-                return new LoadServiceResource(loc, loc.getPath());
+                LoadServiceResource foundResource = new LoadServiceResource(loc, loc.getPath());
+		debugLogFound(foundResource);
+		return foundResource;
             }
         }
 
@@ -994,9 +1024,16 @@ public class LoadService {
         
         // Try to load from classpath without prefix. "A/b.rb" will not load as 
         // "./A/b.rb" in a jar file.
+	debugLogTry("Classpath: " + name);
         URL loc = classLoader.getResource(name);
 
-        return isRequireable(loc) ? new LoadServiceResource(loc, loc.getPath()) : null;
+	if (isRequireable(loc)) {
+	    LoadServiceResource foundResource = new LoadServiceResource(loc, loc.getPath());
+	    debugLogFound(foundResource);
+	    return foundResource;
+	}
+
+	return null;
     }
     
     /* Directories and unavailable resources are not able to open a stream. */
