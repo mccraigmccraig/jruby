@@ -220,7 +220,7 @@ public class RubyInstanceConfig {
     public static boolean nativeEnabled = true;
 
     public static final boolean DEBUG_LOAD_SERVICE
-	= SafePropertyAccessor.getBoolean("jruby.debug.loadService", false);
+        = SafePropertyAccessor.getBoolean("jruby.debug.loadService", false);
 
     public static interface LoadServiceCreator {
         LoadService create(Ruby runtime);
