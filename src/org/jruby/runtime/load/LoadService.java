@@ -640,18 +640,16 @@ public class LoadService {
         }
     }
 
-    private void debugLog(String msg) {
+    private void debugLogTry(String msg) {
         if (RubyInstanceConfig.DEBUG_LOAD_SERVICE) {
-            runtime.getErr().println( "LoadService: " + msg );
+            runtime.getErr().println( "LoadService: trying: " + msg );
         }
     }
 
-    private void debugLogTry(String msg) {
-        debugLog("trying: " + msg);
-    }
-
     private void debugLogFound( LoadServiceResource resource ) {
-        debugLog( "found: " + resource.getURL().toString() );
+        if (RubyInstanceConfig.DEBUG_LOAD_SERVICE) {
+            runtime.getErr().println( "LoadService: found: " + resource.getURL().toString() );
+        }
     }
     
     private Library findBuiltinLibrary(SearchState state, String baseName, SuffixType suffixType) {
