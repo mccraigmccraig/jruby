@@ -225,6 +225,9 @@ public class RubyInstanceConfig {
     public static final boolean USE_GENERATED_HANDLES
             = SafePropertyAccessor.getBoolean("jruby.java.handles", false);
 
+    public static final boolean DEBUG_LOAD_SERVICE
+	= SafePropertyAccessor.getBoolean("jruby.debug.loadService", false);
+
     public static interface LoadServiceCreator {
         LoadService create(Ruby runtime);
 
