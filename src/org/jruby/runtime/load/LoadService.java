@@ -647,8 +647,14 @@ public class LoadService {
     }
 
     private void debugLogFound( LoadServiceResource resource ) {
+        String resourceUrl;
+        try {
+            resourceUrl = resource.getURL().toString();
+        } catch (IOException e) {
+            resourceUrl = e.getMessage();
+        }
         if (RubyInstanceConfig.DEBUG_LOAD_SERVICE) {
-            runtime.getErr().println( "LoadService: found: " + resource.getURL().toString() );
+            runtime.getErr().println( "LoadService: found: " + resourceUrl );
         }
     }
     
@@ -736,16 +742,8 @@ public class LoadService {
                     if(!namePlusSuffix.startsWith("./")) {
                         s = "./" + s;
                     }
-                    try {
-                        foundResource = new LoadServiceResource(file.toURI().toURL(), namePlusSuffix);
-                        debugLogFound(foundResource);
-                        state.loadName = namePlusSuffix;
-                        break;
-                    } catch (MalformedURLException e) {
-                        throw runtime.newIOErrorFromException(e);
-                    }
-
                     foundResource = new LoadServiceResource(file, s, absolute);
+                    debugLogFound(foundResource);
                     state.loadName = namePlusSuffix;
                     break;
                 }
@@ -953,12 +951,8 @@ public class LoadService {
                 }
                 debugLogTry(actualPath.toString());
                 if (actualPath.isFile() && actualPath.canRead()) {
-                    try {
-                        foundResource = new LoadServiceResource(actualPath, reportedPath, absolute);
-                        debugLogFound(foundResource);
-                    } catch (MalformedURLException e) {
-                        throw runtime.newIOErrorFromException(e);
-                    }
+                    foundResource = new LoadServiceResource(actualPath, reportedPath, absolute);
+                    debugLogFound(foundResource);
                 }
             }
         } catch (SecurityException secEx) {
@@ -991,12 +985,8 @@ public class LoadService {
                 }
                 debugLogTry(actualPath.toString());
                 if (actualPath.isFile() && actualPath.canRead()) {
-                    try {
-                        foundResource = new LoadServiceResource(actualPath, reportedPath);
-                        debugLogFound(foundResource);
-                    } catch (MalformedURLException e) {
-                        throw runtime.newIOErrorFromException(e);
-                    }
+                    foundResource = new LoadServiceResource(actualPath, reportedPath);
+                    debugLogFound(foundResource);
                 }
             }
         } catch (SecurityException secEx) {
