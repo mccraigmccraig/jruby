@@ -646,6 +646,12 @@ public class LoadService {
         }
     }
 
+    private void debugLogFound(String msg) {
+        if (RubyInstanceConfig.DEBUG_LOAD_SERVICE) {
+            runtime.getErr().println( "LoadService: found: " + msg );
+        }
+    }
+
     private void debugLogFound( LoadServiceResource resource ) {
         String resourceUrl;
         try {
@@ -654,16 +660,19 @@ public class LoadService {
             resourceUrl = e.getMessage();
         }
         if (RubyInstanceConfig.DEBUG_LOAD_SERVICE) {
-            runtime.getErr().println( "LoadService: found: " + resourceUrl );
+            debugLogFound( resourceUrl );
         }
     }
     
     private Library findBuiltinLibrary(SearchState state, String baseName, SuffixType suffixType) {
         for (String suffix : suffixType.getSuffixes()) {
             String namePlusSuffix = baseName + suffix;
+            debugLogTry( "builtinLib: " + namePlusSuffix );
             if (builtinLibraries.containsKey(namePlusSuffix)) {
                 state.loadName = namePlusSuffix;
-                return builtinLibraries.get(namePlusSuffix);
+                Library lib = builtinLibraries.get(namePlusSuffix);
+                debugLogFound( "builtinLib: " + namePlusSuffix );
+                return lib;
             }
         }
         return null;
