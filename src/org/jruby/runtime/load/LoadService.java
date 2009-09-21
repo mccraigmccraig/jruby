@@ -670,15 +670,15 @@ public class LoadService {
         }
     }
 
-    private void debugLogTry(String msg) {
+    private void debugLogTry(String what, String msg) {
         if (RubyInstanceConfig.DEBUG_LOAD_SERVICE) {
-            runtime.getErr().println( "LoadService: trying: " + msg );
+            runtime.getErr().println( "LoadService: trying " + what + ": " + msg );
         }
     }
 
-    private void debugLogFound(String msg) {
+    private void debugLogFound(String what, String msg) {
         if (RubyInstanceConfig.DEBUG_LOAD_SERVICE) {
-            runtime.getErr().println( "LoadService: found: " + msg );
+            runtime.getErr().println( "LoadService: found " + what + ": " + msg );
         }
     }
 
@@ -690,18 +690,18 @@ public class LoadService {
             resourceUrl = e.getMessage();
         }
         if (RubyInstanceConfig.DEBUG_LOAD_SERVICE) {
-            debugLogFound( resourceUrl );
+            runtime.getErr().println( "LoadService: found: " + resourceUrl );
         }
     }
     
     private Library findBuiltinLibrary(SearchState state, String baseName, SuffixType suffixType) {
         for (String suffix : suffixType.getSuffixes()) {
             String namePlusSuffix = baseName + suffix;
-            debugLogTry( "builtinLib: " + namePlusSuffix );
+            debugLogTry( "builtinLib",  namePlusSuffix );
             if (builtinLibraries.containsKey(namePlusSuffix)) {
                 state.loadName = namePlusSuffix;
                 Library lib = builtinLibraries.get(namePlusSuffix);
-                debugLogFound( "builtinLib: " + namePlusSuffix );
+                debugLogFound( "builtinLib", namePlusSuffix );
                 return lib;
             }
         }
@@ -774,7 +774,7 @@ public class LoadService {
             // check current directory; if file exists, retrieve URL and return resource
             try {
                 JRubyFile file = JRubyFile.create(runtime.getCurrentDirectory(), RubyFile.expandUserPath(runtime.getCurrentContext(), namePlusSuffix));
-                debugLogTry(file.toString());
+                debugLogTry("resourceFromCWD", file.toString());
                 if (file.isFile() && file.isAbsolute() && file.canRead()) {
                     boolean absolute = true;
                     String s = namePlusSuffix;
@@ -802,7 +802,7 @@ public class LoadService {
                 String namePlusSuffix = baseName + suffix;
                 try {
                     URL url = new URL(namePlusSuffix);
-                    debugLogTry(url.toString());
+                    debugLogTry("resourceFromJarURL", url.toString());
                     if (url.openStream() != null) {
                         foundResource = new LoadServiceResource(url, namePlusSuffix);
                         debugLogFound(foundResource);
@@ -827,7 +827,7 @@ public class LoadService {
                     String filename = namePlusSuffix.substring(namePlusSuffix.indexOf("!/") + 2);
                     String canonicalFilename = canonicalizePath(filename);
                     
-                    debugLogTry(canonicalFilename.toString());
+                    debugLogTry("resourceFromJarURL", canonicalFilename.toString());
                     if(file.getJarEntry(canonicalFilename) != null) {
                         foundResource = new LoadServiceResource(new URL("jar:file:" + jarFile + "!/" + canonicalFilename), namePlusSuffix);
                         debugLogFound(foundResource);
@@ -942,7 +942,7 @@ public class LoadService {
         }
         String canonicalEntry = after+namePlusSuffix;
         if (current != null ) {
-            debugLogTry("trying jar: " + current.getName() + "!/" + canonicalEntry);
+            debugLogTry("resourceFromJarURLWithLoadPath", current.getName() + "!/" + canonicalEntry);
             if (current.getJarEntry(canonicalEntry) != null) {
                 try {
                     if (loadPathEntry.endsWith(".jar")) {
@@ -987,7 +987,7 @@ public class LoadService {
                     }
                     actualPath = JRubyFile.create(JRubyFile.create(runtime.getCurrentDirectory(), loadPathEntry).getAbsolutePath(), RubyFile.expandUserPath(runtime.getCurrentContext(), namePlusSuffix));
                 }
-                debugLogTry(actualPath.toString());
+                debugLogTry("resourceFromLoadPath", actualPath.toString());
                 if (actualPath.isFile() && actualPath.canRead()) {
                     foundResource = new LoadServiceResource(actualPath, reportedPath, absolute);
                     debugLogFound(foundResource);
@@ -1021,7 +1021,7 @@ public class LoadService {
                     actualPath = JRubyFile.create(runtime.getCurrentDirectory(), RubyFile.expandUserPath(runtime.getCurrentContext(), namePlusSuffix));
                     //                    actualPath = new File(RubyFile.expandUserPath(runtime.getCurrentContext(), reportedPath));
                 }
-                debugLogTry(actualPath.toString());
+                debugLogTry("resourceAsIs", actualPath.toString());
                 if (actualPath.isFile() && actualPath.canRead()) {
                     foundResource = new LoadServiceResource(actualPath, reportedPath);
                     debugLogFound(foundResource);
@@ -1061,7 +1061,7 @@ public class LoadService {
             if (entry.charAt(0) == '/' || (entry.length() > 1 && entry.charAt(1) == ':')) continue;
             
             // otherwise, try to load from classpath (Note: Jar resources always uses '/')
-            debugLogTry("Classpath: " + entry + "/" + name);
+            debugLogTry("fileInClasspath", entry + "/" + name);
             URL loc = classLoader.getResource(entry + "/" + name);
 
             // Make sure this is not a directory or unavailable in some way
@@ -1077,7 +1077,7 @@ public class LoadService {
         
         // Try to load from classpath without prefix. "A/b.rb" will not load as 
         // "./A/b.rb" in a jar file.
-        debugLogTry("Classpath: " + name);
+        debugLogTry("fileInClasspath", name);
         URL loc = classLoader.getResource(name);
 
         if (isRequireable(loc)) {
