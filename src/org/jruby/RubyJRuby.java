@@ -34,14 +34,19 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map.Entry;
 import org.jruby.anno.JRubyMethod;
 import org.jruby.anno.JRubyModule;
 import org.jruby.anno.JRubyClass;
 
 import org.jruby.ast.ArgsNode;
 import org.jruby.ast.ListNode;
+import org.jruby.exceptions.RaiseException;
 import org.jruby.javasupport.Java;
 import org.jruby.javasupport.JavaObject;
 import org.jruby.runtime.Arity;
@@ -64,7 +69,6 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.util.TraceClassVisitor;
 
 import java.util.Map;
-import org.jruby.RubyObject;
 import org.jruby.runtime.ExecutionContext;
 import org.jruby.runtime.ObjectAllocator;
 
@@ -157,6 +161,23 @@ public class RubyJRuby {
     @JRubyMethod(name = "runtime", frame = true, module = true)
     public static IRubyObject runtime(IRubyObject recv, Block unusedBlock) {
         return Java.java_to_ruby(recv, JavaObject.wrap(recv.getRuntime(), recv.getRuntime()), Block.NULL_BLOCK);
+    }
+
+    @JRubyMethod(frame = true, module = true)
+    public static IRubyObject with_current_runtime_as_global(ThreadContext context, IRubyObject recv, Block block) {
+        Ruby currentRuntime = context.getRuntime();
+        Ruby globalRuntime = Ruby.getGlobalRuntime();
+        try {
+            if (globalRuntime != currentRuntime) {
+                currentRuntime.useAsGlobalRuntime();
+            }
+            block.yieldSpecific(context);
+        } finally {
+            if (Ruby.getGlobalRuntime() != globalRuntime) {
+                globalRuntime.useAsGlobalRuntime();
+            }
+        }
+        return currentRuntime.getNil();
     }
 
     @JRubyMethod(name = "objectspace", frame = true, module = true)
@@ -297,57 +318,78 @@ public class RubyJRuby {
 
     public abstract static class JRubyExecutionContextLocal extends RubyObject {
         private IRubyObject default_value;
+        private RubyProc default_proc;
 
         public JRubyExecutionContextLocal(Ruby runtime, RubyClass type) {
             super(runtime, type);
             default_value = runtime.getNil();
+            default_proc = null;
         }
 
         @JRubyMethod(name="initialize", required=0, optional=1)
         public IRubyObject rubyInitialize(ThreadContext context, IRubyObject args[], Block block) {
-            if (args.length > 0) {
-                default_value = args[0];
+            if (block.isGiven()) {
+                if (args.length != 0) {
+                    throw context.getRuntime().newArgumentError("wrong number of arguments");
+                }
+                default_proc = block.getProcObject();
+                if (default_proc == null) {
+                    default_proc = RubyProc.newProc(context.getRuntime(), block, block.type);
+                }
+            } else {
+                if (args.length == 1) {
+                    default_value = args[0];
+                } else if (args.length != 0) {
+                    throw context.getRuntime().newArgumentError("wrong number of arguments");
+                }
             }
             return context.getRuntime().getNil();
         }
 
-        @JRubyMethod(name="default_value", required=0)
-        public IRubyObject getDefaultValue(ThreadContext context, Block block) {
+        @JRubyMethod(name="default", required=0)
+        public IRubyObject getDefault(ThreadContext context) {
             return default_value;
         }
 
+        @JRubyMethod(name="default_proc", required=0)
+        public IRubyObject getDefaultProc(ThreadContext context) {
+            if (default_proc != null) {
+                return default_proc;
+            } else {
+                return context.getRuntime().getNil();
+            }
+        }
+
+        private static final IRubyObject[] EMPTY_ARGS = new IRubyObject[]{};
+
         @JRubyMethod(name="value", required=0)
-        public IRubyObject getValue(ThreadContext context, Block block) {
+        public IRubyObject getValue(ThreadContext context) {
             final IRubyObject value;
-            value = getContextVariables(context).get(this);
+            final Map<Object, IRubyObject> contextVariables;
+            contextVariables = getContextVariables(context);
+            value = contextVariables.get(this);
             if (value != null) {
                 return value;
+            } else if (default_proc != null) {
+                // pre-set for the sake of terminating recursive calls
+                contextVariables.put(this, context.getRuntime().getNil());
+
+                final IRubyObject new_value;
+                new_value = default_proc.call(context, EMPTY_ARGS, null, Block.NULL_BLOCK);
+                contextVariables.put(this, new_value);
+                return new_value;
             } else {
                 return default_value;
             }
         }
 
         @JRubyMethod(name="value=", required=1)
-        public IRubyObject setValue(ThreadContext context, IRubyObject value, Block block) {
+        public IRubyObject setValue(ThreadContext context, IRubyObject value) {
             getContextVariables(context).put(this, value);
             return value;
         }
 
-        @JRubyMethod(name="with_value", required=1)
-        public IRubyObject withValue(ThreadContext context, IRubyObject value, Block block) {
-             final Map<Object, IRubyObject> contextVariables;
-             contextVariables = getContextVariables(context);
-             final IRubyObject old_value;
-             old_value = contextVariables.get(this);
-             contextVariables.put(this, value);
-             try {
-                 return block.yieldSpecific(context);
-             } finally {
-                 contextVariables.put(this, old_value);
-             }
-        }
-
-        private final Map<Object, IRubyObject> getContextVariables(ThreadContext context) {
+        protected final Map<Object, IRubyObject> getContextVariables(ThreadContext context) {
             return getExecutionContext(context).getContextVariables();
         }
 
@@ -381,6 +423,20 @@ public class RubyJRuby {
 
         public JRubyFiberLocal(Ruby runtime, RubyClass type) {
             super(runtime, type);
+        }
+
+        @JRubyMethod(name="with_value", required=1)
+        public IRubyObject withValue(ThreadContext context, IRubyObject value, Block block) {
+            final Map<Object, IRubyObject> contextVariables;
+            contextVariables = getContextVariables(context);
+            final IRubyObject old_value;
+            old_value = contextVariables.get(this);
+            contextVariables.put(this, value);
+            try {
+                return block.yieldSpecific(context);
+            } finally {
+                contextVariables.put(this, old_value);
+            }
         }
 
         protected final ExecutionContext getExecutionContext(ThreadContext context) {
@@ -452,8 +508,8 @@ public class RubyJRuby {
             return RubyArray.newArray(context.getRuntime(), clazz.subclasses(recursive)).freeze(context);
         }
 
-        @JRubyMethod(name = "become_java!")
-        public static IRubyObject become_java_bang(ThreadContext context, IRubyObject maybeClass) {
+        @JRubyMethod(name = "become_java!", optional = 1)
+        public static IRubyObject become_java_bang(ThreadContext context, IRubyObject maybeClass, IRubyObject[] args) {
             RubyClass clazz;
             if (maybeClass instanceof RubyClass) {
                 clazz = (RubyClass)maybeClass;
@@ -461,7 +517,11 @@ public class RubyJRuby {
                 throw context.getRuntime().newTypeError(maybeClass, context.getRuntime().getClassClass());
             }
 
-            clazz.reify();
+            if (args.length > 0) {
+                clazz.reify(args[0].convertToString().asJavaString());
+            } else {
+                clazz.reify();
+            }
 
             return JavaUtil.convertJavaToUsableRubyObject(context.getRuntime(), clazz.getReifiedClass());
         }
@@ -484,13 +544,7 @@ public class RubyJRuby {
 
         @JRubyMethod
         public static IRubyObject add_method_annotation(ThreadContext context, IRubyObject maybeClass, IRubyObject methodName, IRubyObject annoMap) {
-            RubyClass clazz;
-            if (maybeClass instanceof RubyClass) {
-                clazz = (RubyClass)maybeClass;
-            } else {
-                throw context.getRuntime().newTypeError(maybeClass, context.getRuntime().getClassClass());
-            }
-
+            RubyClass clazz = getRubyClass(maybeClass, context);
             String method = methodName.convertToString().asJavaString();
 
             Map<Class,Map<String,Object>> annos = (Map<Class,Map<String,Object>>)annoMap;
@@ -498,27 +552,38 @@ public class RubyJRuby {
             for (Map.Entry<Class,Map<String,Object>> entry : annos.entrySet()) {
                 Map<String,Object> value = entry.getValue();
                 if (value == null) value = Collections.EMPTY_MAP;
-                clazz.addMethodAnnotation(method, entry.getKey(), value);
+                clazz.addMethodAnnotation(method, getAnnoClass(context, entry.getKey()), value);
             }
 
             return context.getRuntime().getNil();
         }
 
         @JRubyMethod
-        public static IRubyObject add_class_annotation(ThreadContext context, IRubyObject maybeClass, IRubyObject annoMap) {
-            RubyClass clazz;
-            if (maybeClass instanceof RubyClass) {
-                clazz = (RubyClass)maybeClass;
-            } else {
-                throw context.getRuntime().newTypeError(maybeClass, context.getRuntime().getClassClass());
-            }
+        public static IRubyObject add_parameter_annotations(ThreadContext context, IRubyObject maybeClass, IRubyObject methodName, IRubyObject paramAnnoMaps) {
+            RubyClass clazz = getRubyClass(maybeClass, context);
+            String method = methodName.convertToString().asJavaString();
+            List<Map<Class,Map<String,Object>>> annos = (List<Map<Class,Map<String,Object>>>) paramAnnoMaps;
 
+            for (int i = annos.size() - 1; i >= 0; i--) {
+                Map<Class, Map<String, Object>> paramAnnos = annos.get(i);
+                for (Map.Entry<Class,Map<String,Object>> entry : paramAnnos.entrySet()) {
+                    Map<String,Object> value = entry.getValue();
+                    if (value == null) value = Collections.EMPTY_MAP;
+                    clazz.addParameterAnnotation(method, i, getAnnoClass(context, entry.getKey()), value);
+                }
+            }
+            return context.getRuntime().getNil();
+        }
+
+        @JRubyMethod
+        public static IRubyObject add_class_annotation(ThreadContext context, IRubyObject maybeClass, IRubyObject annoMap) {
+            RubyClass clazz = getRubyClass(maybeClass, context);
             Map<Class,Map<String,Object>> annos = (Map<Class,Map<String,Object>>)annoMap;
 
             for (Map.Entry<Class,Map<String,Object>> entry : annos.entrySet()) {
                 Map<String,Object> value = entry.getValue();
                 if (value == null) value = Collections.EMPTY_MAP;
-                clazz.addClassAnnotation(entry.getKey(), value);
+                clazz.addClassAnnotation(getAnnoClass(context, entry.getKey()), value);
             }
 
             return context.getRuntime().getNil();
@@ -526,18 +591,37 @@ public class RubyJRuby {
 
         @JRubyMethod
         public static IRubyObject add_method_signature(ThreadContext context, IRubyObject maybeClass, IRubyObject methodName, IRubyObject clsList) {
-            RubyClass clazz;
-            if (maybeClass instanceof RubyClass) {
-                clazz = (RubyClass)maybeClass;
-            } else {
-                throw context.getRuntime().newTypeError(maybeClass, context.getRuntime().getClassClass());
+            RubyClass clazz = getRubyClass(maybeClass, context);
+            List<Class> types = new ArrayList<Class>();
+            for (Iterator i = ((List)clsList).iterator(); i.hasNext();) {
+                types.add(getAnnoClass(context, i.next()));
             }
-
-            List<Class> types = (List<Class>)clsList;
 
             clazz.addMethodSignature(methodName.convertToString().asJavaString(), types.toArray(new Class[types.size()]));
 
             return context.getRuntime().getNil();
+        }
+
+        private static Class getAnnoClass(ThreadContext context, Object annoClass) {
+            if (annoClass instanceof Class) {
+                return (Class) annoClass;
+            } else if (annoClass instanceof IRubyObject) {
+                IRubyObject annoMod = (IRubyObject) annoClass;
+                if (annoMod.respondsTo("java_class")) {
+                    return (Class) JavaUtil.convertRubyToJava(annoMod.callMethod(context, "java_class"));
+                }
+            }
+            throw context.getRuntime().newArgumentError("must supply java class argument instead of " + annoClass.toString());
+        }
+
+        private static RubyClass getRubyClass(IRubyObject maybeClass, ThreadContext context) throws RaiseException {
+            RubyClass clazz;
+            if (maybeClass instanceof RubyClass) {
+                clazz = (RubyClass) maybeClass;
+            } else {
+                throw context.getRuntime().newTypeError(maybeClass, context.getRuntime().getClassClass());
+            }
+            return clazz;
         }
     }
 

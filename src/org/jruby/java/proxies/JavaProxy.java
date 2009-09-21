@@ -200,15 +200,10 @@ public class JavaProxy extends RubyObject {
 
         return context.getRuntime().getNil();
     }
-    
-    @JRubyMethod(meta = true)
-    public static IRubyObject new_instance_for(IRubyObject recv, IRubyObject arg0) {
-        return Java.new_instance_for(recv, arg0);
-    }
 
     @JRubyMethod(meta = true)
     public static IRubyObject to_java_object(IRubyObject recv) {
-        return Java.to_java_object(recv);
+        return recv.getInstanceVariables().fastGetInstanceVariable("@java_class");
     }
 
     @JRubyMethod(name = "equal?")

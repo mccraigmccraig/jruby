@@ -65,7 +65,7 @@ public class RubyInstanceConfig {
     /**
      * The max size of JIT-compiled methods (full class size) allowed.
      */
-    private static final int JIT_MAX_SIZE_LIMIT = Integer.MAX_VALUE;
+    private static final int JIT_MAX_SIZE_LIMIT = 10000;
 
     /**
      * The JIT threshold to the specified method invocation count.
@@ -265,14 +265,29 @@ public class RubyInstanceConfig {
 
     public int characterIndex = 0;
 
-    public RubyInstanceConfig() {
-        if (Ruby.isSecurityRestricted())
-            currentDirectory = "/";
-        else {
-            currentDirectory = JRubyFile.getFileProperty("user.dir");
-        }
+    public RubyInstanceConfig(RubyInstanceConfig parentConfig) {
+        setCurrentDirectory(parentConfig.getCurrentDirectory());
+        samplingEnabled = parentConfig.samplingEnabled;
+        compatVersion = parentConfig.compatVersion;
+        compileMode = parentConfig.getCompileMode();
+        jitLogging = parentConfig.jitLogging;
+        jitLoggingVerbose = parentConfig.jitLoggingVerbose;
+        jitLogEvery = parentConfig.jitLogEvery;
+        jitThreshold = parentConfig.jitThreshold;
+        jitMax = parentConfig.jitMax;
+        jitMaxSize = parentConfig.jitMaxSize;
+        managementEnabled = parentConfig.managementEnabled;
+        runRubyInProcess = parentConfig.runRubyInProcess;
+        excludedMethods = parentConfig.excludedMethods;
+        threadDumpSignal = parentConfig.threadDumpSignal;
+        
+        classCache = new ClassCache<Script>(loader, jitMax);
+    }
 
+    public RubyInstanceConfig() {
+        setCurrentDirectory(Ruby.isSecurityRestricted() ? "/" : JRubyFile.getFileProperty("user.dir"));
         samplingEnabled = SafePropertyAccessor.getBoolean("jruby.sampling.enabled", false);
+
         String compatString = SafePropertyAccessor.getProperty("jruby.compat.version", "RUBY1_8");
         if (compatString.equalsIgnoreCase("RUBY1_8")) {
             compatVersion = CompatVersion.RUBY1_8;
@@ -520,11 +535,21 @@ public class RubyInstanceConfig {
     }
 
     public String getCopyrightString() {
-        return "JRuby - Copyright (C) 2001-2008 The JRuby Community (and contribs)";
+        return "JRuby - Copyright (C) 2001-2009 The JRuby Community (and contribs)";
     }
 
     public void processArguments(String[] arguments) {
         new ArgumentProcessor(arguments).processArguments();
+        String rubyopt = System.getenv("RUBYOPT");
+        if (rubyopt != null) {
+            String[] rubyoptArgs = rubyopt.split("\\s+");
+            for (int i = 0; i < rubyoptArgs.length; i++) {
+                if (!rubyoptArgs[i].startsWith("-")) {
+                    rubyoptArgs[i] = "-" + rubyoptArgs[i];
+                }
+            }
+            new ArgumentProcessor(rubyoptArgs).processArguments();
+        }
     }
 
     public CompileMode getCompileMode() {
@@ -751,6 +776,7 @@ public class RubyInstanceConfig {
             }
 
             // Remaining arguments are for the script itself
+            for (String arg : argv) arglist.add(arg);
             argv = arglist.toArray(new String[arglist.size()]);
         }
 

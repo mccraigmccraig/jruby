@@ -214,6 +214,9 @@ public class RubyArray extends RubyObject implements List {
     }
 
     public static RubyArray newArrayNoCopy(Ruby runtime, IRubyObject[] args, int begin, int length) {
+        assert begin >= 0 : "begin must be >= 0";
+        assert length >= 0 : "length must be >= 0";
+        
         return new RubyArray(runtime, args, begin, length);
     }
 
@@ -647,6 +650,11 @@ public class RubyArray extends RubyObject implements List {
     @JRubyMethod(name = "to_s")
     @Override
     public IRubyObject to_s() {
+        if (getRuntime().is1_9()) {
+            // 1.9 seems to just do inspect for to_s now
+            return inspect();
+        }
+        
         if (realLength == 0) return RubyString.newEmptyString(getRuntime());
 
         return join(getRuntime().getCurrentContext(), getRuntime().getGlobalVariables().get("$,"));
@@ -3039,9 +3047,13 @@ public class RubyArray extends RubyObject implements List {
      */
     @JRubyMethod(name = "cycle")
     public IRubyObject cycle(ThreadContext context, IRubyObject arg, Block block) {
+        if (arg.isNil()) return cycle(context, block);
         if (!block.isGiven()) return enumeratorize(context.getRuntime(), this, "cycle", arg);
-        long n = RubyNumeric.num2long(arg);
-        return n <= 0 ? context.getRuntime().getNil() : cycleCommon(context, n, block);
+
+        long times = RubyNumeric.num2long(arg);
+        if (times <= 0) return context.getRuntime().getNil();
+
+        return cycleCommon(context, times, block);
     }
 
     private IRubyObject cycleCommon(ThreadContext context, long n, Block block) {
@@ -3262,11 +3274,15 @@ public class RubyArray extends RubyObject implements List {
         Random random = runtime.getRandom();
         int n = RubyNumeric.num2int(nv);
 
+        if (n < 0) throw runtime.newArgumentError("negative sample number");
+
         int i, j, k;
         switch (n) {
         case 0: 
             return newEmptyArray(runtime);
         case 1:
+            if (realLength <= 0) return newEmptyArray(runtime);
+            
             return newArray(runtime, values[begin + random.nextInt(realLength)]);
         case 2:
             i = random.nextInt(realLength);
@@ -3392,12 +3408,12 @@ public class RubyArray extends RubyObject implements List {
     }
 
     public boolean add(Object element) {
-        append(JavaUtil.convertJavaToRuby(getRuntime(), element));
+        append(JavaUtil.convertJavaToUsableRubyObject(getRuntime(), element));
         return true;
     }
 
     public boolean remove(Object element) {
-        IRubyObject deleted = delete(getRuntime().getCurrentContext(), JavaUtil.convertJavaToRuby(getRuntime(), element), Block.NULL_BLOCK);
+        IRubyObject deleted = delete(getRuntime().getCurrentContext(), JavaUtil.convertJavaToUsableRubyObject(getRuntime(), element), Block.NULL_BLOCK);
         return deleted.isNil() ? false : true; // TODO: is this correct ?
     }
 
@@ -3454,12 +3470,12 @@ public class RubyArray extends RubyObject implements List {
     }
 
     public Object set(int index, Object element) {
-        return store(index, JavaUtil.convertJavaToRuby(getRuntime(), element));
+        return store(index, JavaUtil.convertJavaToUsableRubyObject(getRuntime(), element));
     }
 
     // TODO: make more efficient by not creating IRubyArray[]
     public void add(int index, Object element) {
-        insert(new IRubyObject[]{RubyFixnum.newFixnum(getRuntime(), index), JavaUtil.convertJavaToRuby(getRuntime(), element)});
+        insert(new IRubyObject[]{RubyFixnum.newFixnum(getRuntime(), index), JavaUtil.convertJavaToUsableRubyObject(getRuntime(), element)});
     }
 
     public Object remove(int index) {
@@ -3470,7 +3486,7 @@ public class RubyArray extends RubyObject implements List {
         int begin = this.begin;
 
         if (element != null) {
-            IRubyObject convertedElement = JavaUtil.convertJavaToRuby(getRuntime(), element);
+            IRubyObject convertedElement = JavaUtil.convertJavaToUsableRubyObject(getRuntime(), element);
 
             for (int i = begin; i < begin + realLength; i++) {
                 if (convertedElement.equals(values[i])) {
@@ -3485,7 +3501,7 @@ public class RubyArray extends RubyObject implements List {
         int begin = this.begin;
 
         if (element != null) {
-            IRubyObject convertedElement = JavaUtil.convertJavaToRuby(getRuntime(), element);
+            IRubyObject convertedElement = JavaUtil.convertJavaToUsableRubyObject(getRuntime(), element);
 
             for (int i = begin + realLength - 1; i >= begin; i--) {
                 if (convertedElement.equals(values[i])) {
@@ -3553,11 +3569,11 @@ public class RubyArray extends RubyObject implements List {
         public void set(Object obj) {
             if (last == -1) throw new IllegalStateException();
 
-            store(last, JavaUtil.convertJavaToRuby(getRuntime(), obj));
+            store(last, JavaUtil.convertJavaToUsableRubyObject(getRuntime(), obj));
         }
 
         public void add(Object obj) {
-            insert(new IRubyObject[] { RubyFixnum.newFixnum(getRuntime(), index++), JavaUtil.convertJavaToRuby(getRuntime(), obj) });
+            insert(new IRubyObject[] { RubyFixnum.newFixnum(getRuntime(), index++), JavaUtil.convertJavaToUsableRubyObject(getRuntime(), obj) });
             last = -1;
         }
     }

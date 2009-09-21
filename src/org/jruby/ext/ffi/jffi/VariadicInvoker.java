@@ -93,19 +93,19 @@ public class VariadicInvoker extends RubyObject {
         for (int i = 0; i < types.length; ++i) {
             NativeType t = NativeType.valueOf(types[i]);
             switch (t) {
-                case INT8:
-                case INT16:
-                case INT32:
-                    paramTypes[i] = NativeType.INT32;
+                case CHAR:
+                case SHORT:
+                case INT:
+                    paramTypes[i] = NativeType.INT;
                     break;
-                case UINT8:
-                case UINT16:
-                case UINT32:
-                    paramTypes[i] = NativeType.UINT32;
+                case UCHAR:
+                case USHORT:
+                case UINT:
+                    paramTypes[i] = NativeType.UINT;
                     break;
-                case FLOAT32:
-                case FLOAT64:
-                    paramTypes[i] = NativeType.FLOAT64;
+                case FLOAT:
+                case DOUBLE:
+                    paramTypes[i] = NativeType.DOUBLE;
                     break;
                 default:
                     paramTypes[i] = t;
@@ -113,25 +113,30 @@ public class VariadicInvoker extends RubyObject {
             ffiParamTypes[i] = getFFIType(paramTypes[i]);
         }
         Invocation invocation = new Invocation(context);
-        Function function = new Function(address, returnType, ffiParamTypes, convention);
-        HeapInvocationBuffer args = new HeapInvocationBuffer(function);
-        for (int i = 0; i < types.length; ++i) {
-            DefaultMethodFactory.getMarshaller(paramTypes[i]).marshal(invocation, args, params[i]);
+        try {
+            Function function = new Function(address, returnType, ffiParamTypes, convention);
+            HeapInvocationBuffer args = new HeapInvocationBuffer(function);
+            for (int i = 0; i < types.length; ++i) {
+                DefaultMethodFactory.getMarshaller(paramTypes[i]).marshal(invocation, args, params[i]);
+            }
+
+            return functionInvoker.invoke(context.getRuntime(), function, args);
+        } finally {
+            invocation.finish();
         }
-        return functionInvoker.invoke(context.getRuntime(), function, args);
     }
     private static final Type getFFIType(NativeParam type) {
         if (type instanceof NativeType) switch ((NativeType) type) {
             case VOID: return com.kenai.jffi.Type.VOID;
             case BOOL: return com.kenai.jffi.Type.UINT32;
-            case INT8: return com.kenai.jffi.Type.SINT8;
-            case UINT8: return com.kenai.jffi.Type.UINT8;
-            case INT16: return com.kenai.jffi.Type.SINT16;
-            case UINT16: return com.kenai.jffi.Type.UINT16;
-            case INT32: return com.kenai.jffi.Type.SINT32;
-            case UINT32: return com.kenai.jffi.Type.UINT32;
-            case INT64: return com.kenai.jffi.Type.SINT64;
-            case UINT64: return com.kenai.jffi.Type.UINT64;
+            case CHAR: return com.kenai.jffi.Type.SINT8;
+            case UCHAR: return com.kenai.jffi.Type.UINT8;
+            case SHORT: return com.kenai.jffi.Type.SINT16;
+            case USHORT: return com.kenai.jffi.Type.UINT16;
+            case INT: return com.kenai.jffi.Type.SINT32;
+            case UINT: return com.kenai.jffi.Type.UINT32;
+            case LONG_LONG: return com.kenai.jffi.Type.SINT64;
+            case ULONG_LONG: return com.kenai.jffi.Type.UINT64;
             case LONG:
                 return com.kenai.jffi.Platform.getPlatform().addressSize() == 32
                         ? com.kenai.jffi.Type.SINT32
@@ -140,8 +145,8 @@ public class VariadicInvoker extends RubyObject {
                 return com.kenai.jffi.Platform.getPlatform().addressSize() == 32
                         ? com.kenai.jffi.Type.UINT32
                         : com.kenai.jffi.Type.UINT64;
-            case FLOAT32: return com.kenai.jffi.Type.FLOAT;
-            case FLOAT64: return com.kenai.jffi.Type.DOUBLE;
+            case FLOAT: return com.kenai.jffi.Type.FLOAT;
+            case DOUBLE: return com.kenai.jffi.Type.DOUBLE;
             case POINTER: return com.kenai.jffi.Type.POINTER;
             case BUFFER_IN:
             case BUFFER_OUT:

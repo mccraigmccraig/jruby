@@ -594,7 +594,7 @@ public class RubyBasicObject implements Cloneable, IRubyObject, Serializable, Co
     public String asJavaString() {
         IRubyObject asString = checkStringType();
         if(!asString.isNil()) return ((RubyString)asString).asJavaString();
-        throw getRuntime().newTypeError(inspect().toString() + " is not a symbol");
+        throw getRuntime().newTypeError(inspect().toString() + " is not a string");
     }
 
     /** rb_obj_as_string
@@ -932,7 +932,7 @@ public class RubyBasicObject implements Cloneable, IRubyObject, Serializable, Co
 
     @JRubyMethod(name = "!=", required = 1, compat = CompatVersion.RUBY1_9)
     public IRubyObject op_not_equal(ThreadContext context, IRubyObject other) {
-        return context.getRuntime().newBoolean(!equalInternal(context, this, other));
+        return context.getRuntime().newBoolean(!op_equal(context, other).isTrue());
     }
 
     public int compareTo(IRubyObject other) {
@@ -957,7 +957,7 @@ public class RubyBasicObject implements Cloneable, IRubyObject, Serializable, Co
      */
     @JRubyMethod(name = "equal?", required = 1, compat = CompatVersion.RUBY1_9)
     public IRubyObject op_eqq(ThreadContext context, IRubyObject other) {
-        return context.getRuntime().newBoolean(equalInternal(context, this, other));
+        return op_equal(context, other);
     }
 
     /**
@@ -1070,7 +1070,7 @@ public class RubyBasicObject implements Cloneable, IRubyObject, Serializable, Co
         for (Map.Entry<String, RubyClass.VariableAccessor> entry : ivarAccessors.entrySet()) {
             Object value = entry.getValue().get(this);
             if (value == null) continue;
-            list.add(new VariableEntry<Object>(entry.getKey(), (IRubyObject)value));
+            list.add(new VariableEntry<Object>(entry.getKey(), value));
         }
         return list;
     }

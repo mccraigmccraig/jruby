@@ -29,6 +29,7 @@ package org.jruby;
 
 import org.jruby.anno.JRubyMethod;
 import org.jruby.anno.JRubyModule;
+import org.jruby.ext.Generator;
 import org.jruby.javasupport.util.RuntimeHelpers;
 import org.jruby.runtime.Block;
 import org.jruby.runtime.BlockCallback;
@@ -47,7 +48,7 @@ public class RubyEnumerator extends RubyObject {
     private IRubyObject object;
 
     /** method to invoke for each operation */
-    private IRubyObject method;
+    private String method;
 
     /** args to each method */
     private IRubyObject[] methodArgs;
@@ -70,7 +71,7 @@ public class RubyEnumerator extends RubyObject {
         runtime.setEnumerator(enmr);
 
         if (runtime.is1_9()) {
-            RubyGenerator.createGeneratorClass(runtime);
+            Generator.createGenerator(runtime);
             RubyYielder.createYielderClass(runtime);
         }
     }
@@ -83,13 +84,13 @@ public class RubyEnumerator extends RubyObject {
 
     private RubyEnumerator(Ruby runtime, RubyClass type) {
         super(runtime, type);
-        object = method = runtime.getNil();
+        object = runtime.getNil();
     }
 
     private RubyEnumerator(Ruby runtime, IRubyObject object, IRubyObject method, IRubyObject[]args) {
         super(runtime, runtime.getEnumerator());
         this.object = object;
-        this.method = method;
+        this.method = method.asJavaString();
         this.methodArgs = args;
     }
 
@@ -122,7 +123,7 @@ public class RubyEnumerator extends RubyObject {
 
     private IRubyObject initialize(IRubyObject object, IRubyObject method, IRubyObject[] methodArgs) {
         this.object = object;
-        this.method = method;
+        this.method = method.asJavaString();
         this.methodArgs = methodArgs;
         return this;
     }
@@ -146,7 +147,7 @@ public class RubyEnumerator extends RubyObject {
      */
     @JRubyMethod(name = "each", frame = true)
     public IRubyObject each(ThreadContext context, Block block) {
-        return object.callMethod(context, method.asJavaString(), methodArgs, block);
+        return object.callMethod(context, method, methodArgs, block);
     }
 
     @JRubyMethod(name = "inspect", compat = CompatVersion.RUBY1_9)
@@ -176,7 +177,7 @@ public class RubyEnumerator extends RubyObject {
             boolean tainted = isTaint();
             bytes.append(RubyObject.inspect(context, object).getByteList());
             bytes.append((byte)':');
-            bytes.append(method.asString().getByteList());
+            bytes.append(method.getBytes());
             if (methodArgs.length > 0) {
                 bytes.append((byte)'(');
                 for (int i= 0; i < methodArgs.length; i++) {
@@ -298,8 +299,18 @@ public class RubyEnumerator extends RubyObject {
 
         @JRubyMethod(name = "each_with_object", frame = true, compat = CompatVersion.RUBY1_9)
         public static IRubyObject each_with_object(ThreadContext context, IRubyObject self, final IRubyObject arg, final Block block) {
+            return with_object_common(context, self, arg, block, "each_with_object");
+        }
+
+        @JRubyMethod(name = "with_object", frame = true, compat = CompatVersion.RUBY1_9)
+        public static IRubyObject with_object(ThreadContext context, IRubyObject self, final IRubyObject arg, final Block block) {
+            return with_object_common(context, self, arg, block, "with_object");
+        }
+
+        private static IRubyObject with_object_common(ThreadContext context, IRubyObject self,
+                final IRubyObject arg, final Block block, final String rubyMethodName) {
             final Ruby runtime = context.getRuntime();
-            if (!block.isGiven()) return enumeratorize(runtime, self , "each_with_object", arg);
+            if (!block.isGiven()) return enumeratorize(runtime, self , rubyMethodName, arg);
 
             RubyEnumerable.callEach(runtime, context, self, new BlockCallback() {
                 public IRubyObject call(ThreadContext ctx, IRubyObject[] largs, Block blk) {
@@ -325,8 +336,11 @@ public class RubyEnumerator extends RubyObject {
         }
     }
 
-    public static IRubyObject with_index_common(ThreadContext context, IRubyObject self, final Block block) {
+    private static IRubyObject with_index_common(ThreadContext context, IRubyObject self, 
+            final Block block, final String rubyMethodName) {
         final Ruby runtime = context.getRuntime();
+        if (!block.isGiven()) return enumeratorize(runtime, self , rubyMethodName);
+        
         IRubyObject[] args = new IRubyObject[0];
 
         RubyEnumerator e = (RubyEnumerator)self;
@@ -339,27 +353,115 @@ public class RubyEnumerator extends RubyObject {
 
     @JRubyMethod(name = "each_with_index", frame = true)
     public static IRubyObject each_with_index(ThreadContext context, IRubyObject self, final Block block) {
-        final Ruby runtime = context.getRuntime();
-        if (!block.isGiven()) return enumeratorize(runtime, self , "each_with_index");
-        return with_index_common(context, self, block);
+        return with_index_common(context, self, block, "each_with_index");
     }
 
     @JRubyMethod(name = "with_index", frame = true)
     public static IRubyObject with_index(ThreadContext context, IRubyObject self, final Block block) {
-        final Ruby runtime = context.getRuntime();
-        if (!block.isGiven()) return enumeratorize(runtime, self , "with_index");
-        return with_index_common(context, self, block);
+        return with_index_common(context, self, block, "with_index");
     }
 
-    @JRubyMethod(name = "next", frame = true)
+    @JRubyMethod(name = "next", frame = true, compat = CompatVersion.RUBY1_8)
     public static IRubyObject next(ThreadContext context, IRubyObject self, Block block) {
         context.getRuntime().getLoadService().lockAndRequire("generator");
-        return self.callMethod(context, "next", new IRubyObject[0], block);
+        return self.callMethod(context, "next", IRubyObject.NULL_ARRAY, block);
     }
 
-    @JRubyMethod(name = "rewind", frame = true)
+    @JRubyMethod(name = "rewind", frame = true, compat = CompatVersion.RUBY1_8)
     public static IRubyObject rewind(ThreadContext context, IRubyObject self, Block block) {
         context.getRuntime().getLoadService().lockAndRequire("generator");
-        return self.callMethod(context, "rewind", new IRubyObject[0], block);
+        return self.callMethod(context, "rewind", IRubyObject.NULL_ARRAY, block);
+    }
+
+    private static final ByteList ITER_END_MESSAGE = ByteList.create("iteration reached at end");
+
+    @JRubyMethod(name = "next", frame = true, compat = CompatVersion.RUBY1_9)
+    public synchronized IRubyObject next19(ThreadContext context) {
+        Ruby runtime = context.getRuntime();
+        ensureGenerator();
+
+        if (!generator.hasNext()) {
+            generator.rewind();
+            return this.callMethod(context, "raise",
+                    new IRubyObject[] {runtime.getStopIteration(), RubyString.newStringShared(runtime, ITER_END_MESSAGE)},
+                    Block.NULL_BLOCK);
+        }
+        return generator.next();
+    }
+
+    @JRubyMethod(name = "rewind", frame = true, compat = CompatVersion.RUBY1_9)
+    public IRubyObject rewind19(ThreadContext context) {
+        ensureGenerator();
+        
+        generator.rewind();
+        return this;
+    }
+
+    private abstract class EnumeratorGenerator {
+        public abstract IRubyObject next();
+        public abstract boolean hasNext();
+        public abstract void rewind();
+    }
+
+    private EnumeratorGenerator generator;
+
+    private class DefaultGenerator extends EnumeratorGenerator {
+        private final IRubyObject currentGen;
+        private final Ruby runtime;
+        public DefaultGenerator() {
+            runtime = getRuntime();
+            currentGen = runtime.getGenerator().callMethod(runtime.getCurrentContext(), "new", RubyEnumerator.this);
+        }
+        
+        public IRubyObject next() {
+            return currentGen.callMethod(runtime.getCurrentContext(), "next");
+        }
+
+        public boolean hasNext() {
+            return !currentGen.callMethod(runtime.getCurrentContext(), "end?").isTrue();
+        }
+
+        public void rewind() {
+            currentGen.callMethod(runtime.getCurrentContext(), "rewind");
+        }
+    }
+
+    private class ArrayEachGenerator extends EnumeratorGenerator {
+        private final RubyArray array;
+        private int index;
+
+        public ArrayEachGenerator(RubyArray array) {
+            this.array = array;
+            this.index = 0;
+        }
+
+        public synchronized IRubyObject next() {
+            if (index < array.size()) {
+                return array.eltInternal(index++);
+            }
+            return array.getRuntime().getNil();
+        }
+
+        public synchronized boolean hasNext() {
+            return index < array.size();
+        }
+
+        public synchronized void rewind() {
+            index = 0;
+        }
+    }
+
+    private synchronized void ensureGenerator() {
+        if (generator == null) {
+            generator = constructGenerator(object, method);
+        }
+    }
+
+    private EnumeratorGenerator constructGenerator(IRubyObject object, String method) {
+        if (object instanceof RubyArray && method.equals("each")) {
+            return new ArrayEachGenerator((RubyArray)object);
+        } else {
+            return new DefaultGenerator();
+        }
     }
 }

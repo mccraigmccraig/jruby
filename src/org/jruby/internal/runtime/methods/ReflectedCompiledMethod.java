@@ -67,7 +67,7 @@ public class ReflectedCompiledMethod extends CompiledMethod {
                     // XXX Wrong, but will have to do for now
                     runtime.callEventHooks(context, RubyEvent.CALL, context.getFile(), context.getLine(), name, getImplementationClass());
                 }
-                return (IRubyObject)method.invoke($scriptObject, context, self, args, block);
+                return (IRubyObject)method.invoke(null, $scriptObject, context, self, args, block);
             } finally {
                 if (isTrace) {
                     Frame frame = context.getPreviousFrame();
@@ -77,9 +77,9 @@ public class ReflectedCompiledMethod extends CompiledMethod {
             }
             
         } catch (IllegalArgumentException e) {
-            throw RaiseException.createNativeRaiseException(runtime, e);
+            throw RaiseException.createNativeRaiseException(runtime, e, method);
         } catch (IllegalAccessException e) {
-            throw RaiseException.createNativeRaiseException(runtime, e);
+            throw RaiseException.createNativeRaiseException(runtime, e, method);
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause();
             if (cause instanceof JumpException.ReturnJump) {
@@ -91,7 +91,7 @@ public class ReflectedCompiledMethod extends CompiledMethod {
             } else if (cause instanceof Error) {
                 throw (Error)cause;                
             } else {
-                throw RaiseException.createNativeRaiseException(runtime, cause);
+                throw RaiseException.createNativeRaiseException(runtime, cause, method);
             }
         } finally {
             callConfig.post(context);

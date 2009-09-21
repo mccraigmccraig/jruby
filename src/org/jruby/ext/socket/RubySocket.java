@@ -458,6 +458,7 @@ public class RubySocket extends RubyBasicSocket {
             Ruby r = context.getRuntime();
             IRubyObject host = args[0];
             IRubyObject port = args[1];
+            boolean emptyHost = host.isNil() || host.convertToString().isEmpty();
 
             if(port instanceof RubyString) {
                 port = getservbyname(context, recv, new IRubyObject[]{port});
@@ -466,20 +467,35 @@ public class RubySocket extends RubyBasicSocket {
             //IRubyObject family = args[2];
             IRubyObject socktype = args[3];
             //IRubyObject protocol = args[4];
-            //IRubyObject flags = args[5];
+            IRubyObject flags = args[5];
+
             boolean sock_stream = true;
             boolean sock_dgram = true;
             if(!socktype.isNil()) {
                 int val = RubyNumeric.fix2int(socktype);
-                if(val == 1) {
+                if(val == SOCK_STREAM.value()) {
                     sock_dgram = false;
-                } else if(val == 2) {
+                } else if(val == SOCK_DGRAM.value()) {
                     sock_stream = false;
                 }
             }
-            InetAddress[] addrs = InetAddress.getAllByName(host.isNil() ? null : host.convertToString().toString());
+
+            // When Socket::AI_PASSIVE and host is nil, return 'any' address. 
+            InetAddress[] addrs = null; 
+            if(!flags.isNil()) {
+                // The value of 1 is for Socket::AI_PASSIVE.
+                int flag = RubyNumeric.fix2int(flags);
+                if ((flag == 1) && emptyHost ) {
+                    addrs = InetAddress.getAllByName("0.0.0.0");
+                }
+
+            }
+
+            if (addrs == null)
+                addrs = InetAddress.getAllByName(emptyHost ? null : host.convertToString().toString());
+
             List<IRubyObject> l = new ArrayList<IRubyObject>();
-            for(int i=0;i<addrs.length;i++) {
+            for(int i = 0; i < addrs.length; i++) {
                 IRubyObject[] c;
                 if(sock_dgram) {
                     c = new IRubyObject[7];

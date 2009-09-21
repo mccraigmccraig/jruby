@@ -50,7 +50,6 @@ import org.jruby.runtime.ObjectAllocator;
 import org.jruby.runtime.ThreadContext;
 import org.jruby.runtime.builtin.IRubyObject;
 import org.jruby.runtime.marshal.UnmarshalStream;
-import org.jruby.util.Convert;
 import org.jruby.util.Convert2;
 import org.jruby.util.Numeric;
 import org.jruby.util.TypeCoercer;
@@ -127,6 +126,11 @@ public class RubyFixnum extends RubyInteger {
     @Override
     public final boolean eql(IRubyObject other) {
         return other instanceof RubyFixnum && value == ((RubyFixnum)other).value;
+    }
+
+    @Override
+    public IRubyObject equal_p(ThreadContext context, IRubyObject obj) {
+        return context.getRuntime().newBoolean(this == obj || eql(obj));
     }
     
     @Override

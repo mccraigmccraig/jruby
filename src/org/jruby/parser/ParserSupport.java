@@ -35,6 +35,7 @@
  ***** END LICENSE BLOCK *****/
 package org.jruby.parser;
 
+import org.jruby.CompatVersion;
 import org.jruby.ast.AndNode;
 import org.jruby.ast.ArgsPreOneArgNode;
 import org.jruby.ast.ArgsPreTwoArgNode;
@@ -66,6 +67,7 @@ import org.jruby.ast.CallNode;
 import org.jruby.ast.CallOneArgNode;
 import org.jruby.ast.CallOneArgBlockNode;
 import org.jruby.ast.CallOneArgBlockPassNode;
+import org.jruby.ast.CallOneArgFixnumNode;
 import org.jruby.ast.CallSpecialArgNode;
 import org.jruby.ast.CallSpecialArgBlockNode;
 import org.jruby.ast.CallSpecialArgBlockPassNode;
@@ -420,8 +422,9 @@ public class ParserSupport {
         
         checkExpression(firstNode);
         checkExpression(secondNode);
-        
-        return new CallOneArgNode(firstNode.getPosition(), firstNode, operator, new ArrayNode(secondNode.getPosition(), secondNode));
+
+        return new_call_one_arg(firstNode.getPosition(), firstNode, operator, secondNode);
+//        return new CallOneArgNode(firstNode.getPosition(), firstNode, operator, new ArrayNode(secondNode.getPosition(), secondNode));
     }
 
     public Node getMatchNode(Node firstNode, Node secondNode) {
@@ -764,7 +767,7 @@ public class ParserSupport {
             warningUnlessEOption(ID.REGEXP_LITERAL_IN_CONDITION, node, "regex literal in condition");
             
             return new MatchNode(node.getPosition(), node);
-        } 
+        }
 
         return node;
     }
@@ -997,6 +1000,33 @@ public class ParserSupport {
                 return new CallManyArgsBlockPassNode(position, receiver, name, args, blockPass);
         } 
     }
+    
+    private boolean isNumericOperator(String name) {
+        if (name.length() == 1) {
+            switch (name.charAt(0)) {
+                case '+': case '-': case '*': case '/': case '<': case '>':
+                    return true;
+            }
+        } else if (name.length() == 2) {
+            switch (name.charAt(0)) {
+            case '<': case '>': case '=':
+                switch (name.charAt(1)) {
+                case '=': case '<':
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+
+    private Node new_call_one_arg(ISourcePosition position, Node receiver, String name, Node first) {
+        if (first instanceof FixnumNode && isNumericOperator(name)) {
+            return new CallOneArgFixnumNode(position, receiver, name, new ArrayNode(position, first));
+        }
+
+        return new CallOneArgNode(position, receiver, name, new ArrayNode(position, first));
+    }
 
     public Node new_call(Node receiver, Token name, Node argsNode, Node iter) {
         if (argsNode == null) return new_call_noargs(receiver, name, (IterNode) iter);
@@ -1011,7 +1041,7 @@ public class ParserSupport {
                 return new CallNoArgNode(position(receiver, args), receiver, args, (String) name.getValue());
             case 1:
                 if (iter != null) return new CallOneArgBlockNode(position(receiver, args), receiver, (String) name.getValue(), args, (IterNode) iter);
-                
+
                 return new CallOneArgNode(position(receiver, args), receiver, (String) name.getValue(), args);
             case 2:
                 if (iter != null) return new CallTwoArgBlockNode(position(receiver, args), receiver, (String) name.getValue(), args, (IterNode) iter);
@@ -1026,6 +1056,17 @@ public class ParserSupport {
 
                 return new CallManyArgsNode(position(receiver, args), receiver, (String) name.getValue(), args);
         }
+    }
+
+    public Node new_aref(Node receiver, Token name, Node argsNode) {
+        if (argsNode instanceof ArrayNode) {
+            ArrayNode args = (ArrayNode) argsNode;
+
+            if (args.size() == 1 && args.get(0) instanceof FixnumNode) {
+                return new CallOneArgFixnumNode(position(receiver, args), receiver, "[]", args);
+            }
+        }
+        return new_call(receiver, name, argsNode, null);
     }
 
     public Colon2Node new_colon2(ISourcePosition position, Node leftNode, String name) {
@@ -1252,8 +1293,8 @@ public class ParserSupport {
                         lexer.getCurrentLine(), "Block argument should not be given.");
             }
 
-            // FIXME: This does not seem to be in 1.9
-            if (node instanceof ArrayNode && ((ArrayNode)node).size() == 1) {
+            if (node instanceof ArrayNode && configuration.getVersion() == CompatVersion.RUBY1_8 &&
+                    ((ArrayNode)node).size() == 1) {
                 node = ((ArrayNode)node).get(0);
                 state = false;
             }

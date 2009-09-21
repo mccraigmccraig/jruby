@@ -1177,6 +1177,7 @@ public class RubyRegexp extends RubyObject implements ReOptions, EncodingCapable
     // rb_reg_initialize
     private RubyRegexp initializeCommon19(ByteList bytes, Encoding enc, int options) {
         Ruby runtime = getRuntime();        
+        setKCode(runtime, options);
         if (!isTaint() && runtime.getSafeLevel() >= 4) throw runtime.newSecurityError("Insecure: can't modify regexp");
         checkFrozen();
         if (isLiteral()) throw runtime.newSecurityError("can't modify literal regexp");
@@ -1674,7 +1675,7 @@ public class RubyRegexp extends RubyObject implements ReOptions, EncodingCapable
                     p += n;
                     continue;
                 } else if (c == '/') {
-                    to.append(c);
+                    to.append((byte) '\\');
                     to.append(bytes, p, cl);
                 } else if (!Encoding.isAscii(c)) {
                     int l = StringSupport.length(enc, bytes, p, end);

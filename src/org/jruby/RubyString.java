@@ -2312,14 +2312,14 @@ public class RubyString extends RubyObject implements EncodingCapable {
     /** rb_str_sub / rb_str_sub_bang
      *
      */
-    @JRubyMethod(name = "sub", frame = true, compat = CompatVersion.RUBY1_8)
+    @JRubyMethod(name = "sub", frame = true, reads = BACKREF, writes = BACKREF, compat = CompatVersion.RUBY1_8)
     public IRubyObject sub(ThreadContext context, IRubyObject arg0, Block block) {
         RubyString str = strDup(context.getRuntime());
         str.sub_bang(context, arg0, block);
         return str;
     }
 
-    @JRubyMethod(name = "sub", frame = true, compat = CompatVersion.RUBY1_8)
+    @JRubyMethod(name = "sub", frame = true, reads = BACKREF, writes = BACKREF, compat = CompatVersion.RUBY1_8)
     public IRubyObject sub(ThreadContext context, IRubyObject arg0, IRubyObject arg1, Block block) {
         RubyString str = strDup(context.getRuntime());
         str.sub_bang(context, arg0, arg1, block);
@@ -2395,14 +2395,14 @@ public class RubyString extends RubyObject implements EncodingCapable {
         return this;
     }
 
-    @JRubyMethod(name = "sub", frame = true, compat = CompatVersion.RUBY1_9)
+    @JRubyMethod(name = "sub", frame = true, reads = BACKREF, writes = BACKREF, compat = CompatVersion.RUBY1_9)
     public IRubyObject sub19(ThreadContext context, IRubyObject arg0, Block block) {
         RubyString str = strDup(context.getRuntime());
         str.sub_bang19(context, arg0, block);
         return str;
     }
 
-    @JRubyMethod(name = "sub", frame = true, compat = CompatVersion.RUBY1_9)
+    @JRubyMethod(name = "sub", frame = true, reads = BACKREF, writes = BACKREF, compat = CompatVersion.RUBY1_9)
     public IRubyObject sub19(ThreadContext context, IRubyObject arg0, IRubyObject arg1, Block block) {
         RubyString str = strDup(context.getRuntime());
         str.sub_bang19(context, arg0, arg1, block);
@@ -2489,7 +2489,7 @@ public class RubyString extends RubyObject implements EncodingCapable {
         int range = begin + value.realSize;
         final Matcher matcher = prepared.matcher(value.bytes, begin, range);
 
-        DynamicScope scope = context.getPreviousScope();
+        DynamicScope scope = context.getCurrentScope();
         if (matcher.search(begin, range, Option.NONE) >= 0) {
             repl = RubyRegexp.regsub19(repl, this, matcher, pattern);
             RubyMatchData match = RubyRegexp.updateBackRef19(context, this, scope, matcher, pattern);
@@ -4279,47 +4279,26 @@ public class RubyString extends RubyObject implements EncodingCapable {
 
         RubyArray result = runtime.newArray();
         Encoding enc = checkEncoding(spat);
+        ByteList pattern = spat.value;
 
-        byte[]bytes = value.bytes;
-        int p = value.begin;
-        int begin = p;
-        int len = value.realSize;
-        int end = p + len;
-
-        ByteList svalue = spat.value;
-        byte[]sbytes = svalue.bytes;
-        int sp = svalue.begin;
-        int slen = svalue.realSize;
-
-        int e;
-        while (p < end && (e = find(bytes, begin, len, sbytes, sp, slen, p)) >= 0) {
-            int t = enc.rightAdjustCharHead(bytes, p, e, end);
+        int e, p = 0;
+        
+        while (p < value.realSize && (e = value.indexOf(pattern, p)) >= 0) {
+            int t = enc.rightAdjustCharHead(value.bytes, p + value.begin, e, p + value.realSize);
             if (t != e) {
                 p = t;
                 continue;
             }
-            result.append(makeShared19(runtime, p - begin, e - p));
-            p = e + slen;
+            result.append(makeShared19(runtime, p, e - p));
+            p = e + pattern.realSize;
             if (limit && lim <= ++i) break;
         }
-        if (len > 0 && (limit || len > p || lim < 0)) result.append(makeShared19(runtime, p, len - p));
-        return result;
-    }
 
-    private static int find(byte[] in, int inP, int inLen, byte[] what, int whatP, int whatLen, int start) {
-        byte first  = what[whatP];
-        int max = inP + (inLen - whatLen);
-
-        for (int i = inP + start; i <= max; i++) {
-            if (in[i] != first) while (++i <= max && in[i] != first);
-            if (i <= max) {
-                int j = i + 1;
-                int end = j + whatLen - 1;
-                for (int k = whatP + 1; j < end && in[j] == what[k]; j++, k++);
-                if (j == end) return i - inP;
-            }
+        if (value.realSize > 0 && (limit || value.realSize > p || lim < 0)) {
+            result.append(makeShared19(runtime, p, value.realSize - p));
         }
-        return -1;
+
+        return result;
     }
 
     private RubyString getStringForPattern(IRubyObject obj) {
@@ -6838,12 +6817,7 @@ public class RubyString extends RubyObject implements EncodingCapable {
     @JRubyMethod(name = "force_encoding", compat = CompatVersion.RUBY1_9)
     public IRubyObject force_encoding(ThreadContext context, IRubyObject enc) {
         modify19();
-        Encoding encoding;
-        if (enc instanceof RubyEncoding) {
-            encoding = ((RubyEncoding) enc).getEncoding();
-        } else {
-            encoding = enc.convertToString().toEncoding(context.getRuntime());
-        }
+        Encoding encoding = RubyEncoding.getEncodingFromObject(context.getRuntime(), enc);
         associateEncoding(encoding);
         return this;
     }

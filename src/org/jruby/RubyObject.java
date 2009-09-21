@@ -556,7 +556,7 @@ public class RubyObject extends RubyBasicObject {
     @JRubyMethod(name = "===", required = 1)
     @Override
     public IRubyObject op_eqq(ThreadContext context, IRubyObject other) {
-        return super.op_eqq(context, other);
+        return context.getRuntime().newBoolean(equalInternal(context, this, other));
     }
 
     /**
@@ -1174,7 +1174,7 @@ public class RubyObject extends RubyBasicObject {
             }
             if (all) {
                 RubyClass superClass = getMetaClass().getSuperClass();
-                while (superClass.isIncluded()) {
+                while (superClass.isSingleton() || superClass.isIncluded()) {
                     singletonMethods.concat(superClass.instance_methods(new IRubyObject[] {context.getRuntime().getFalse()}));
                     superClass = superClass.getSuperClass();
                 }
@@ -1488,6 +1488,11 @@ public class RubyObject extends RubyBasicObject {
     @JRubyMethod(name = "=~", required = 1)
     public IRubyObject op_match(ThreadContext context, IRubyObject arg) {
     	return context.getRuntime().getFalse();
+    }
+
+    @JRubyMethod(name = "!~", required = 1, compat = CompatVersion.RUBY1_9)
+    public IRubyObject op_not_match(ThreadContext context, IRubyObject arg) {
+        return context.getRuntime().newBoolean(! callMethod(context, "=~", arg).isTrue());
     }
 
     public IRubyObject to_java() {

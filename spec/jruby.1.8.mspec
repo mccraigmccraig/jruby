@@ -2,11 +2,9 @@
 
 # detect windows platform:
 require 'rbconfig'
-WINDOWS = Config::CONFIG['host_os'] =~ /Windows|mswin/
 require 'java'
 
 IKVM = java.lang.System.get_property('java.vm.name') =~ /IKVM\.NET/
-
 DIR = File.dirname(__FILE__)
 
 class MSpecScript
@@ -89,11 +87,15 @@ class MSpecScript
   set :ci_files, get(:language) + get(:core) + get(:library)
 
   # The default implementation to run the specs.
-  if WINDOWS
-    jruby_script = 'jruby.bat'
-  else
-    jruby_script = 'jruby'
-  end
+  set :target, DIR + '/../bin/' + Config::CONFIG['ruby_install_name']
 
-  set :target, DIR + '/../bin/' + jruby_script
+  set :backtrace_filter, /mspec\//
+
+  set :tags_patterns, [
+                        [%r(ruby/language/),     'tags/1.8/ruby/language/'],
+                        [%r(ruby/core/),         'tags/1.8/ruby/core/'],
+                        [%r(ruby/command_line/), 'tags/1.8/ruby/command_line/'],
+                        [%r(ruby/library/),      'tags/1.8/ruby/library/'],
+                        [/_spec.rb$/,       '_tags.txt']
+                      ]
 end

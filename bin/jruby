@@ -61,6 +61,29 @@ if [ -z "$JRUBY_OPTS" ] ; then
   JRUBY_OPTS=""
 fi
 
+JRUBY_OPTS_SPECIAL="--ng" # space-separated list of special flags
+unset JRUBY_OPTS_TEMP
+function process_special_opts {
+    case $1 in
+        --ng) nailgun_client=true;;
+        *) break;;
+    esac
+}
+for opt in ${JRUBY_OPTS[@]}; do
+    for special in ${JRUBY_OPTS_SPECIAL[@]}; do
+        if [ $opt != $special ]; then
+            JRUBY_OPTS_TEMP="${JRUBY_OPTS_TEMP} $opt"
+        else
+            # make sure flags listed in JRUBY_OPTS_SPECIAL are processed
+            case "$opt" in
+            --ng)
+                process_special_opts $opt;;
+            esac
+        fi
+    done
+done
+JRUBY_OPTS=${JRUBY_OPTS_TEMP}
+
 if [ -z "$JAVA_HOME" ] ; then
   JAVA_CMD='java'
 else
@@ -170,6 +193,9 @@ do
             fi
             java_args=("${java_args[@]}" "${1:2}")
         fi
+        if [ "$CP" != "" ]; then
+          CLASSPATH=""
+        fi
         ;;
      # Match switches that take an argument
      -C|-e|-I|-S) ruby_args=("${ruby_args[@]}" "$1" "$2"); shift ;;
@@ -218,7 +244,7 @@ do
         VERIFY_JRUBY=true ;;
      --ng)
         # Use native Nailgun client to toss commands to server
-        nailgun_client=true ;;
+        process_special_opts "--ng" ;;
      # Abort processing on the double dash
      --) break ;;
      # Other opts go to ruby
@@ -285,7 +311,7 @@ if [ "$nailgun_client" != "" ]; then
   if [ -f $JRUBY_HOME/tool/nailgun/ng ]; then
     exec $JRUBY_HOME/tool/nailgun/ng org.jruby.util.NailMain $JRUBY_OPTS "$@"
   else
-    echo "error: ng executable not found; run 'make' in tool/nailgun"
+    echo "error: ng executable not found; run 'make' in ${JRUBY_HOME}/tool/nailgun"
     exit 1
   fi
 else

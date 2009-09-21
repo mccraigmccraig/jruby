@@ -6,19 +6,20 @@ import com.kenai.jffi.Closure;
 import com.kenai.jffi.ClosureManager;
 import java.lang.ref.WeakReference;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.jruby.Ruby;
 import org.jruby.RubyClass;
 import org.jruby.RubyModule;
 import org.jruby.RubyNumeric;
+import org.jruby.RubyObject;
 import org.jruby.RubyProc;
 import org.jruby.anno.JRubyClass;
 import org.jruby.ext.ffi.AllocatedDirectMemoryIO;
 import org.jruby.ext.ffi.CallbackInfo;
 import org.jruby.ext.ffi.InvalidMemoryIO;
+import org.jruby.ext.ffi.MemoryIO;
 import org.jruby.ext.ffi.Platform;
 import org.jruby.ext.ffi.Pointer;
 import org.jruby.ext.ffi.Type;
@@ -33,6 +34,7 @@ import org.jruby.runtime.builtin.IRubyObject;
  */
 public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
     private static final int LONG_SIZE = Platform.getPlatform().longSize();
+    private static final String CALLBACK_ID = "ffi_callback";
 
     /** Holder for the single instance of CallbackManager */
     private static final class SingletonHolder {
@@ -65,19 +67,15 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
         return cbClass;
     }
     
-    /**
-     * A map to keep {@link Callback} instances alive
-     * 
-     * This maps from either a Proc or Block to another map of
-     * CallbackInfo:Callback. This allows the fringe case of a single proc 
-     * object being passed as an argument to different functions.
-     */
-    private final Map<Object, Map<CallbackInfo, Callback>> callbackMap =
-            new WeakHashMap<Object, Map<CallbackInfo, Callback>>();
-
     /** A map of Ruby CallbackInfo to low level JFFI Closure metadata */
     private final Map<CallbackInfo, ClosureInfo> infoMap =
             Collections.synchronizedMap(new WeakHashMap<CallbackInfo, ClosureInfo>());
+
+    public final org.jruby.ext.ffi.Pointer getCallback(Ruby runtime, CallbackInfo cbInfo, Object proc) {
+        return proc instanceof RubyObject
+                ? getCallback(runtime, cbInfo, (RubyObject) proc)
+                : newCallback(runtime, cbInfo, proc);
+    }
 
     /**
      * Gets a Callback object conforming to the signature contained in the
@@ -85,24 +83,66 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
      *
      * @param runtime The ruby runtime the callback is attached to
      * @param cbInfo The signature of the native callback
-     * @param proc The ruby <tt>Proc</tt> or <tt>Block</tt> object to call when
-     * the callback is invoked.
+     * @param proc The ruby object to call when the callback is invoked.
      * @return A native value returned to the native caller.
      */
-    public final org.jruby.ext.ffi.Pointer getCallback(Ruby runtime, CallbackInfo cbInfo, Object proc) {
-        Map<CallbackInfo, Callback> map;
-        synchronized (callbackMap) {
-            map = callbackMap.get(proc);
-            if (map != null) {
-                Callback cb = map.get(cbInfo);
+    public final org.jruby.ext.ffi.Pointer getCallback(Ruby runtime, CallbackInfo cbInfo, RubyObject proc) {
+        if (proc instanceof Function) {
+            return (Function) proc;
+        }
+
+        synchronized (proc) {
+            Object existing = proc.fastGetInternalVariable(CALLBACK_ID);
+            if (existing instanceof Callback && ((Callback) existing).cbInfo == cbInfo) {
+                return (Callback) existing;
+            } else if (existing instanceof Map) {
+                Map m = (Map) existing;
+                Callback cb = (Callback) m.get(proc);
                 if (cb != null) {
                     return cb;
                 }
-            } else {
-                callbackMap.put(proc, map = Collections.synchronizedMap(new HashMap<CallbackInfo, Callback>(2)));
             }
-        }
 
+            Callback cb = newCallback(runtime, cbInfo, proc);
+            
+            if (existing == null) {
+                ((RubyObject) proc).fastSetInternalVariable(CALLBACK_ID, cb);
+            } else {
+                Map<CallbackInfo, Callback> m = existing instanceof Map
+                        ? (Map<CallbackInfo, Callback>) existing
+                        : Collections.synchronizedMap(new WeakHashMap<CallbackInfo, Callback>());
+                m.put(cbInfo, cb);
+                m.put(((Callback) existing).cbInfo, (Callback) existing);
+                ((RubyObject) proc).fastSetInternalVariable(CALLBACK_ID, m);
+            }
+
+            return cb;
+        }
+        
+    }
+
+    /**
+     * Gets a Callback object conforming to the signature contained in the
+     * <tt>CallbackInfo</tt> for the ruby <tt>Proc</tt> or <tt>Block</tt> instance.
+     *
+     * @param runtime The ruby runtime the callback is attached to
+     * @param cbInfo The signature of the native callback
+     * @param proc The ruby <tt>Block</tt> object to call when the callback is invoked.
+     * @return A native value returned to the native caller.
+     */
+    final Callback getCallback(Ruby runtime, CallbackInfo cbInfo, Block proc) {
+        return newCallback(runtime, cbInfo, proc);
+    }
+
+    private final Callback newCallback(Ruby runtime, CallbackInfo cbInfo, Object proc) {
+        ClosureInfo info = getClosureInfo(runtime, cbInfo);
+        WeakRefCallbackProxy cbProxy = new WeakRefCallbackProxy(runtime, info, proc);
+        Closure.Handle handle = ClosureManager.getInstance().newClosure(cbProxy,
+                info.ffiReturnType, info.ffiParameterTypes, info.convention);
+        return new Callback(runtime, handle, cbInfo);
+    }
+
+    private final ClosureInfo getClosureInfo(Ruby runtime, CallbackInfo cbInfo) {
         ClosureInfo info = infoMap.get(cbInfo);
         if (info == null) {
             CallingConvention convention = "stdcall".equals(null)
@@ -110,14 +150,8 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
             info = new ClosureInfo(runtime, cbInfo.getReturnType(), cbInfo.getParameterTypes(), convention);
             infoMap.put(cbInfo, info);
         }
-        
-        final WeakRefCallbackProxy cbProxy = new WeakRefCallbackProxy(runtime, info, proc);
-        final Closure.Handle handle = ClosureManager.getInstance().newClosure(cbProxy,
-                info.ffiReturnType, info.ffiParameterTypes, info.convention);
-        Callback cb = new Callback(runtime, handle, cbInfo, proc);
-        map.put(cbInfo, cb);
 
-        return cb;
+        return info;
     }
 
     /**
@@ -172,13 +206,18 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
     @JRubyClass(name = "FFI::Callback", parent = "FFI::Pointer")
     static class Callback extends Pointer {
         private final CallbackInfo cbInfo;
-        private final Object proc;
         
-        Callback(Ruby runtime, Closure.Handle handle, CallbackInfo cbInfo, Object proc) {
+        Callback(Ruby runtime, Closure.Handle handle, CallbackInfo cbInfo) {
             super(runtime, runtime.fastGetModule("FFI").fastGetClass("Callback"),
                     new CallbackMemoryIO(runtime, handle), Long.MAX_VALUE);
             this.cbInfo = cbInfo;
-            this.proc = proc;
+        }
+
+        void dispose() {
+            MemoryIO mem = getMemoryIO();
+            if (mem instanceof CallbackMemoryIO) {
+                ((CallbackMemoryIO) mem).free();
+            }
         }
     }
 
@@ -256,13 +295,8 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
      * CallbackMemoryIO instance is contained in a valid Callback pointer.
      */
     static final class CallbackMemoryIO extends InvalidMemoryIO implements AllocatedDirectMemoryIO {
-        /**
-         * Reference map to keep code alive if autorelease=(true) is set
-         */
-        private static final Map<CallbackMemoryIO, Boolean> refmap
-            = new ConcurrentHashMap<CallbackMemoryIO, Boolean>();
-
         private final Closure.Handle handle;
+        private final AtomicBoolean released = new AtomicBoolean(false);
 
         public CallbackMemoryIO(Ruby runtime,  Closure.Handle handle) {
             super(runtime);
@@ -282,17 +316,15 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
         }
 
         public void free() {
-            refmap.remove(this);
+            if (released.getAndSet(true)) {
+                throw runtime.newRuntimeError("callback already freed");
+            }
+            handle.free();
         }
 
         public void setAutoRelease(boolean autorelease) {
-            if (autorelease) {
-                refmap.remove(this);
-            } else {
-                refmap.put(this, true);
-            }
+            handle.setAutoRelease(autorelease);
         }
-
     }
 
     /**
@@ -345,21 +377,21 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
             switch (type.getNativeType()) {
                 case VOID:
                     break;
-                case INT8:
+                case CHAR:
                     buffer.setByteReturn((byte) longValue(value)); break;
-                case UINT8:
+                case UCHAR:
                     buffer.setByteReturn((byte) longValue(value)); break;
-                case INT16:
+                case SHORT:
                     buffer.setShortReturn((short) longValue(value)); break;
-                case UINT16:
+                case USHORT:
                     buffer.setShortReturn((short) longValue(value)); break;
-                case INT32:
+                case INT:
                     buffer.setIntReturn((int) longValue(value)); break;
-                case UINT32:
+                case UINT:
                     buffer.setIntReturn((int) longValue(value)); break;
-                case INT64:
+                case LONG_LONG:
                     buffer.setLongReturn(Util.int64Value(value)); break;
-                case UINT64:
+                case ULONG_LONG:
                     buffer.setLongReturn(Util.uint64Value(value)); break;
 
                 case LONG:
@@ -378,9 +410,9 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
                     }
                     break;
 
-                case FLOAT32:
+                case FLOAT:
                     buffer.setFloatReturn((float) RubyNumeric.num2dbl(value)); break;
-                case FLOAT64:
+                case DOUBLE:
                     buffer.setDoubleReturn(RubyNumeric.num2dbl(value)); break;
                 case POINTER:
                     buffer.setAddressReturn(addressValue(value)); break;
@@ -415,21 +447,21 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
         switch (type.getNativeType()) {
             case VOID:
                 return runtime.getNil();
-            case INT8:
+            case CHAR:
                 return Util.newSigned8(runtime, buffer.getByte(index));
-            case UINT8:
+            case UCHAR:
                 return Util.newUnsigned8(runtime, buffer.getByte(index));
-            case INT16:
+            case SHORT:
                 return Util.newSigned16(runtime, buffer.getShort(index));
-            case UINT16:
+            case USHORT:
                 return Util.newUnsigned16(runtime, buffer.getShort(index));
-            case INT32:
+            case INT:
                 return Util.newSigned32(runtime, buffer.getInt(index));
-            case UINT32:
+            case UINT:
                 return Util.newUnsigned32(runtime, buffer.getInt(index));
-            case INT64:
+            case LONG_LONG:
                 return Util.newSigned64(runtime, buffer.getLong(index));
-            case UINT64:
+            case ULONG_LONG:
                 return Util.newUnsigned64(runtime, buffer.getLong(index));
 
             case LONG:
@@ -441,9 +473,9 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
                         ? Util.newUnsigned32(runtime, buffer.getInt(index))
                         : Util.newUnsigned64(runtime, buffer.getLong(index));
 
-            case FLOAT32:
+            case FLOAT:
                 return runtime.newFloat(buffer.getFloat(index));
-            case FLOAT64:
+            case DOUBLE:
                 return runtime.newFloat(buffer.getDouble(index));
             case POINTER: {
                 final long address = buffer.getAddress(index);
@@ -491,18 +523,18 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
     private static final boolean isReturnTypeValid(Type type) {
         if (type instanceof Type.Builtin) {
             switch (type.getNativeType()) {
-                case INT8:
-                case UINT8:
-                case INT16:
-                case UINT16:
-                case INT32:
-                case UINT32:
+                case CHAR:
+                case UCHAR:
+                case SHORT:
+                case USHORT:
+                case INT:
+                case UINT:
                 case LONG:
                 case ULONG:
-                case INT64:
-                case UINT64:
-                case FLOAT32:
-                case FLOAT64:
+                case LONG_LONG:
+                case ULONG_LONG:
+                case FLOAT:
+                case DOUBLE:
                 case POINTER:
                 case VOID:
                 case BOOL:
@@ -523,18 +555,18 @@ public class CallbackManager extends org.jruby.ext.ffi.CallbackManager {
     private static final boolean isParameterTypeValid(Type type) {
         if (type instanceof Type.Builtin) {
             switch (type.getNativeType()) {
-                case INT8:
-                case UINT8:
-                case INT16:
-                case UINT16:
-                case INT32:
-                case UINT32:
+                case CHAR:
+                case UCHAR:
+                case SHORT:
+                case USHORT:
+                case INT:
+                case UINT:
                 case LONG:
                 case ULONG:
-                case INT64:
-                case UINT64:
-                case FLOAT32:
-                case FLOAT64:
+                case LONG_LONG:
+                case ULONG_LONG:
+                case FLOAT:
+                case DOUBLE:
                 case POINTER:
                 case STRING:
                 case BOOL:
