@@ -56,6 +56,8 @@ import static org.jruby.util.StringSupport.unpackArg;
 import static org.jruby.util.StringSupport.unpackResult;
 
 import java.io.UnsupportedEncodingException;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.Locale;
 
@@ -74,12 +76,12 @@ import org.joni.Region;
 import org.jruby.anno.JRubyClass;
 import org.jruby.anno.JRubyMethod;
 import org.jruby.java.MiniJava;
+import org.jruby.javasupport.JavaUtil;
 import org.jruby.javasupport.util.RuntimeHelpers;
 import org.jruby.runtime.Arity;
 import org.jruby.runtime.Block;
 import org.jruby.runtime.ClassIndex;
 import org.jruby.runtime.DynamicScope;
-import org.jruby.runtime.Frame;
 import org.jruby.runtime.ObjectAllocator;
 import org.jruby.runtime.ThreadContext;
 import org.jruby.runtime.Visibility;
@@ -363,13 +365,13 @@ public class RubyString extends RubyObject implements EncodingCapable {
     public RubyString(Ruby runtime, RubyClass rubyClass, CharSequence value) {
         super(runtime, rubyClass);
         assert value != null;
-        this.value = new ByteList(ByteList.plain(value), false);
-    }
-
-    public RubyString(Ruby runtime, RubyClass rubyClass, String value) {
-        super(runtime, rubyClass);
-        assert value != null;
-        this.value = new ByteList(value.getBytes(), false);
+        byte[] bytes = null;
+        try {
+            bytes = value.toString().getBytes("UTF-8");
+        } catch (UnsupportedEncodingException ex) {
+            bytes = ByteList.plain(value);
+        }
+        this.value = new ByteList(bytes, false);
     }
 
     public RubyString(Ruby runtime, RubyClass rubyClass, byte[] value) {
@@ -6813,6 +6815,29 @@ public class RubyString extends RubyObject implements EncodingCapable {
     public IRubyObject encoding(ThreadContext context) {
         return context.getRuntime().getEncodingService().getEncoding(value.encoding);
     }
+
+    @JRubyMethod(name = "encode!", compat = CompatVersion.RUBY1_9)
+    public IRubyObject encode_bang(ThreadContext context, IRubyObject enc) {
+        modify19();
+
+        // from encoding, special-casing ASCII* to ASCII
+        Charset from = value.encoding.toString().startsWith("ASCII") ?
+            Charset.forName("ASCII") :
+            Charset.forName(value.encoding.toString());
+
+        // to encoding, same special-casing
+        Encoding encoding = RubyEncoding.getEncodingFromObject(context.getRuntime(), enc);
+        Charset to = encoding.toString().startsWith("ASCII") ?
+            Charset.forName("ASCII") :
+            Charset.forName(encoding.toString());
+
+        // decode from "from" and encode to "to"
+        ByteBuffer fromBytes = ByteBuffer.wrap(value.unsafeBytes(), value.begin(), value.length());
+        ByteBuffer toBytes = to.encode(from.decode(fromBytes));
+        value = new ByteList(toBytes.array(), encoding);
+
+        return this;
+    }
     
     @JRubyMethod(name = "force_encoding", compat = CompatVersion.RUBY1_9)
     public IRubyObject force_encoding(ThreadContext context, IRubyObject enc) {
@@ -6874,6 +6899,10 @@ public class RubyString extends RubyObject implements EncodingCapable {
     @Override
     public IRubyObject to_java() {
         return MiniJava.javaToRuby(getRuntime(), new String(getBytes()));
+    }
+
+    public Object toJava(Class target) {
+        return JavaUtil.coerceStringToType(this, target);
     }
 
     /**

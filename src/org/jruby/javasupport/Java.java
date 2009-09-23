@@ -524,7 +524,7 @@ public class Java implements Library {
                 Object[] newArgs = new Object[args.length];
                 Class[] parameterTypes = matching.getParameterTypes();
                 for (int i = 0; i < args.length; i++) {
-                    newArgs[i] = JavaUtil.convertArgumentToType(context, args[i], parameterTypes[i]);
+                    newArgs[i] = args[i].toJava(parameterTypes[i]);
                 }
                 JavaObject newObject = matching.newInstance(self, newArgs);
                 return JavaUtilities.set_java_object(self, self, newObject);
@@ -964,7 +964,7 @@ public class Java implements Library {
 
                     IRubyObject[] rubyArgs = JavaUtil.convertJavaArrayToRuby(runtime, nargs);
                     try {
-                        return JavaUtil.convertRubyToJava(RuntimeHelpers.invoke(runtime.getCurrentContext(), wrapper, methodName, rubyArgs), method.getReturnType());
+                        return RuntimeHelpers.invoke(runtime.getCurrentContext(), wrapper, methodName, rubyArgs).toJava(method.getReturnType());
                     } catch (RuntimeException e) { e.printStackTrace(); throw e; }
                 }
             }));
